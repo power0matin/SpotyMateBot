@@ -6,6 +6,8 @@ import re
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 import os
+import logging
+
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -56,11 +58,17 @@ def process_spotify_link(
     link: str, language: str, get_recommendations: bool = False
 ) -> dict | str | list:
     """Process a Spotify link and return track information or recommendations."""
+    logger.info(
+        f"Processing Spotify link: {link}, recommendations: {get_recommendations}"
+    )
     try:
         sp = get_spotify_client()
         if get_recommendations:
             track_id = link.split(":")[-1]
             recommendations = sp.recommendations(seed_tracks=[track_id], limit=3)
+            logger.info(
+                f"Fetched {len(recommendations['tracks'])} recommendations for track_id: {track_id}"
+            )
             return [
                 {
                     "title": track["name"],
@@ -82,7 +90,7 @@ def process_spotify_link(
                 track["artists"][0]["id"]
             ).get("genres", [])
             genre = genres[0] if genres else None
-            return {
+            track_info = {
                 "track_id": track["id"],
                 "title": track["name"],
                 "artist": track["artists"][0]["name"],
@@ -96,9 +104,15 @@ def process_spotify_link(
                 "duration": duration,
                 "release_date": album.get("release_date", "Unknown"),
             }
+            logger.info(
+                f"Processed track info: {track_info['title']} by {track_info['artist']}"
+            )
+            return track_info
         else:
+            logger.warning(f"Unsupported Spotify link: {link}")
             return get_message(language, "unsupported_link")
     except Exception as e:
+        logger.error(f"Error processing Spotify link {link}: {str(e)}")
         return get_message(language, "error").format(error=str(e))
 
 
@@ -115,6 +129,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(get_message(language, "help"))
 
 
+# Configure logging
+logging.basicConfig(
+    format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+# Global Spotify client
+_spotify_client = None
+
+
 def get_spotify_client():
     """Get or initialize the global Spotify client."""
     global _spotify_client
@@ -126,4 +150,5 @@ def get_spotify_client():
                 client_id=client_id, client_secret=client_secret
             )
         )
+        logger.info("Spotify client initialized")
     return _spotify_client

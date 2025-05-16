@@ -9,6 +9,13 @@ import os
 import tempfile
 from spotdl import Spotdl
 from spotdl.types.options import DownloaderOptions
+import logging
+
+# Configure logging
+logging.basicConfig(
+    format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
 # Global spotdl client
 _spotdl_client = None
@@ -23,12 +30,16 @@ def get_spotdl_client():
             client_secret=os.getenv("SPOTIFY_CLIENT_SECRET"),
             downloader_settings=DownloaderOptions(output="data/downloads"),
         )
+        logger.info("Spotdl client initialized")
     return _spotdl_client
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     current_language = get_user_language(user_id)
+    logger.info(
+        f"User {user_id} started bot, language: {current_language or 'not set'}"
+    )
 
     if current_language:
         await update.message.reply_text(
@@ -52,6 +63,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def set_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    language = get_user_language(user_id) or "en"
+    logger.info(f"User {user_id} requested to set language, current: {language}")
+
     keyboard = [
         [
             InlineKeyboardButton("فارسی 🇮🇷", callback_data="lang_fa"),
@@ -59,7 +73,6 @@ async def set_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    language = get_user_language(user_id) or "en"
     await update.message.reply_text(
         get_message(language, "set_language_prompt"), reply_markup=reply_markup
     )
@@ -72,6 +85,7 @@ async def language_selection(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_id = query.from_user.id
     language = query.data.split("_")[1]  # Extract 'fa' or 'en'
     language_name = "فارسی" if language == "fa" else "English"
+    logger.info(f"User {user_id} selected language: {language_name}")
 
     save_user_language(user_id, language)
     await query.message.edit_text(
@@ -82,6 +96,7 @@ async def language_selection(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     language = get_user_language(user_id) or "en"
+    logger.info(f"User {user_id} requested help, language: {language}")
     await update.message.reply_text(get_message(language, "help"))
 
 
@@ -89,9 +104,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     language = get_user_language(user_id) or "en"
     message_text = update.message.text
+    logger.info(f"User {user_id} sent message: {message_text}")
 
     spotify_pattern = r"https?://open\.spotify\.com/(track|album|playlist)/[a-zA-Z0-9]+"
     if re.search(spotify_pattern, message_text):
+        logger.info(f"Processing Spotify link for user {user_id}: {message_text}")
         track_info = process_spotify_link(message_text, language)
         if isinstance(track_info, dict):
             # Create inline buttons
@@ -132,26 +149,37 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     ),
                     reply_markup=reply_markup,
                 )
+                logger.info(
+                    f"Sent track info to user {user_id}: {track_info['title']} by {track_info['artist']}"
+                )
             except Exception as e:
+                logger.error(f"Error sending track info to user {user_id}: {str(e)}")
                 await update.message.reply_text(
                     get_message(language, "error").format(error=str(e))
                 )
         else:
+            logger.warning(
+                f"Invalid Spotify link response for user {user_id}: {track_info}"
+            )
             await update.message.reply_text(track_info)
     else:
+        logger.info(f"Non-Spotify message from user {user_id}, sending help")
         await update.message.reply_text(get_message(language, "help"))
 
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    language = get_user_language(query.from_user.id) or "en"
+    user_id = query.from_user.id
+    language = get_user_language(user_id) or "en"
     callback_data = query.data
+    logger.info(f"User {user_id} clicked button: {callback_data}")
 
     if callback_data.startswith("lang_"):
         await language_selection(update, context)
     elif callback_data.startswith("similar_"):
         track_id = callback_data.split("_")[1]
+        logger.info(f"Fetching similar songs for user {user_id}, track_id: {track_id}")
         recommendations = process_spotify_link(
             f"spotify:track:{track_id}", language, get_recommendations=True
         )
@@ -165,13 +193,23 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             )
             await query.message.reply_text(response)
+            logger.info(f"Sent similar songs to user {user_id}")
         else:
+            logger.warning(
+                f"No similar songs found for user {user_id}, track_id: {track_id}"
+            )
             await query.message.reply_text(
                 get_message(language, "similar_songs_placeholder")
             )
     elif callback_data.startswith("download_preview_"):
         _, track_id, preview_url = callback_data.split("_", 2)
+        logger.info(
+            f"User {user_id} requested preview download, track_id: {track_id}, preview_url: {preview_url}"
+        )
         if preview_url == "no_preview" or not preview_url:
+            logger.warning(
+                f"No preview available for user {user_id}, track_id: {track_id}"
+            )
             await query.message.reply_text(get_message(language, "no_preview"))
         else:
             try:
@@ -188,17 +226,29 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         caption=get_message(language, "download_preview_caption"),
                     )
                 os.unlink(tmp_file_path)  # Delete temporary file
+                logger.info(
+                    f"Sent preview audio to user {user_id}, track_id: {track_id}"
+                )
             except requests.RequestException as e:
+                logger.error(
+                    f"Preview download failed for user {user_id}, track_id: {track_id}: {str(e)}"
+                )
                 await query.message.reply_text(
                     get_message(language, "download_error").format(error=str(e))
                 )
             except Exception as e:
+                logger.error(
+                    f"Error sending preview to user {user_id}, track_id: {track_id}: {str(e)}"
+                )
                 await query.message.reply_text(
                     get_message(language, "error").format(error=str(e))
                 )
     elif callback_data.startswith("download_song_"):
         track_id = callback_data.split("_")[1]
         spotify_url = f"https://open.spotify.com/track/{track_id}"
+        logger.info(
+            f"User {user_id} requested song download, track_id: {track_id}, url: {spotify_url}"
+        )
         try:
             # Get spotdl client
             spotdl = get_spotdl_client()
@@ -221,13 +271,25 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     # Clean up downloads directory if empty
                     if not os.listdir("data/downloads"):
                         os.rmdir("data/downloads")
+                    logger.info(
+                        f"Sent song audio to user {user_id}: {song.name} by {song.artist}"
+                    )
                 else:
+                    logger.error(
+                        f"Song download failed for user {user_id}, track_id: {track_id}: File not found"
+                    )
                     await query.message.reply_text(
                         get_message(language, "download_error")
                     )
             else:
+                logger.error(
+                    f"Song search failed for user {user_id}, track_id: {track_id}: No songs found"
+                )
                 await query.message.reply_text(get_message(language, "download_error"))
         except Exception as e:
+            logger.error(
+                f"Error downloading song for user {user_id}, track_id: {track_id}: {str(e)}"
+            )
             await query.message.reply_text(
                 get_message(language, "error").format(error=str(e))
             )
@@ -241,6 +303,9 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else "en"
     )
     error_message = str(context.error)
+    logger.error(
+        f"Error occurred for user {update.effective_user.id if upadte and update.effective_user else 'unknown'}: {error_message}"
+    )
     if "BadRequest" in error_message:
         error_message = get_message(language, "telegram_error")
     (

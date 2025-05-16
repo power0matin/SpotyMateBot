@@ -14,14 +14,21 @@ from core.handlers import (
     error_handler,
 )
 from database.db import init_db
+import logging
+
+# Configure logging
+logging.basicConfig(
+    format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
 
 def setup_bot(application: Application):
     """Setup bot handlers and initialize database."""
-    # Initialize database
+    logger.info("Initializing database")
     init_db()
 
-    # Add handlers
+    logger.info("Setting up bot handlers")
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("setlanguage", set_language))
     application.add_handler(CommandHandler("help", help_command))
@@ -30,3 +37,4 @@ def setup_bot(application: Application):
         MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
     )
     application.add_error_handler(error_handler)
+    logger.info("Bot handlers set up successfully")

@@ -1,0 +1,5 @@
+python-telegram-bot==13.7
+spotipy==2.23.0
+python-dotenv==1.0.0
+requests==2.31.0
+spotdl==4.2.8

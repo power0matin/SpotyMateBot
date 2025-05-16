@@ -2,8 +2,10 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from database.db import get_user_language, save_user_language
 from utils.i18n import get_message
-from services.spotify import process_spotify_link
 import re
+import spotipy
+from spotipy.oauth2 import SpotifyClientCredentials
+import os
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -50,6 +52,56 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(get_message(language, "help"))
 
 
+def process_spotify_link(
+    link: str, language: str, get_recommendations: bool = False
+) -> dict | str | list:
+    """Process a Spotify link and return track information or recommendations."""
+    try:
+        sp = get_spotify_client()
+        if get_recommendations:
+            track_id = link.split(":")[-1]
+            recommendations = sp.recommendations(seed_tracks=[track_id], limit=3)
+            return [
+                {
+                    "title": track["name"],
+                    "artist": track["artists"][0]["name"],
+                    "track_id": track["id"],
+                }
+                for track in recommendations["tracks"]
+            ]
+        if "track" in link:
+            track = sp.track(link)
+            album = sp.album(track["album"]["id"])
+            # Convert duration from milliseconds to MM:SS
+            duration_ms = track["duration_ms"]
+            minutes = duration_ms // 60000
+            seconds = (duration_ms % 60000) // 1000
+            duration = f"{minutes}:{seconds:02d}"
+            # Get genre (from album or artist, if available)
+            genres = album.get("genres", []) or sp.artist(
+                track["artists"][0]["id"]
+            ).get("genres", [])
+            genre = genres[0] if genres else None
+            return {
+                "track_id": track["id"],
+                "title": track["name"],
+                "artist": track["artists"][0]["name"],
+                "cover_url": (
+                    track["album"]["images"][0]["url"]
+                    if track["album"]["images"]
+                    else None
+                ),
+                "preview_url": track.get("preview_url", None),
+                "genre": genre,
+                "duration": duration,
+                "release_date": album.get("release_date", "Unknown"),
+            }
+        else:
+            return get_message(language, "unsupported_link")
+    except Exception as e:
+        return get_message(language, "error").format(error=str(e))
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     language = get_user_language(user_id) or "en"
@@ -61,3 +113,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(response)
     else:
         await update.message.reply_text(get_message(language, "help"))
+
+
+def get_spotify_client():
+    """Get or initialize the global Spotify client."""
+    global _spotify_client
+    if _spotify_client is None:
+        client_id = os.getenv("SPOTIFY_CLIENT_ID")
+        client_secret = os.getenv("SPOTIFY_CLIENT_SECRET")
+        _spotify_client = spotipy.Spotify(
+            auth_manager=SpotifyClientCredentials(
+                client_id=client_id, client_secret=client_secret
+            )
+        )
+    return _spotify_client

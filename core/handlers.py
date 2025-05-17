@@ -129,7 +129,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     ),
                     InlineKeyboardButton(
                         get_message(language, "download_song_button"),
-                        callback_data=f"download_song_{track_info['track_id']}",
+                        callback_data=f"select_quality_{track_info['track_id']}",
                     ),
                 ],
             ]
@@ -243,21 +243,44 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.message.reply_text(
                     get_message(language, "error").format(error=str(e))
                 )
-    elif callback_data.startswith("download_song_"):
+    elif callback_data.startswith("select_quality_"):
         track_id = callback_data.split("_")[1]
+        logger.info(
+            f"User {user_id} requested quality selection for track_id: {track_id}"
+        )
+        # Create quality selection buttons
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    "128 kbps", callback_data=f"download_song_{track_id}_128"
+                ),
+                InlineKeyboardButton(
+                    "320 kbps", callback_data=f"download_song_{track_id}_320"
+                ),
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.message.reply_text(
+            get_message(language, "select_quality_prompt"), reply_markup=reply_markup
+        )
+        logger.info(f"Sent quality selection prompt to user {user_id}")
+    elif callback_data.startswith("download_song_"):
+        _, track_id, quality = callback_data.split("_")
         spotify_url = f"https://open.spotify.com/track/{track_id}"
         logger.info(
-            f"User {user_id} requested song download, track_id: {track_id}, url: {spotify_url}"
+            f"User {user_id} requested song download, track_id: {track_id}, quality: {quality}kbps, url: {spotify_url}"
         )
         try:
             # Get spotdl client
             spotdl = get_spotdl_client()
             # Create downloads directory if it doesn't exist
             os.makedirs("data/downloads", exist_ok=True)
-            # Download the song
+            # Download the song with specified bitrate
             songs = spotdl.search([spotify_url])
             if songs:
                 song = songs[0]
+                # Set bitrate in downloader settings
+                spotdl.downloader_settings.bitrate = f"{quality}k"
                 song_path = spotdl.download(song)
                 if os.path.exists(song_path):
                     with open(song_path, "rb") as audio_file:
@@ -272,7 +295,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if not os.listdir("data/downloads"):
                         os.rmdir("data/downloads")
                     logger.info(
-                        f"Sent song audio to user {user_id}: {song.name} by {song.artist}"
+                        f"Sent song audio to user {user_id}: {song.name} by {song.artist}, quality: {quality}kbps"
                     )
                 else:
                     logger.error(
@@ -288,7 +311,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.message.reply_text(get_message(language, "download_error"))
         except Exception as e:
             logger.error(
-                f"Error downloading song for user {user_id}, track_id: {track_id}: {str(e)}"
+                f"Error downloading song for user {user_id}, track_id: {track_id}, quality: {quality}kbps: {str(e)}"
             )
             await query.message.reply_text(
                 get_message(language, "error").format(error=str(e))
@@ -304,7 +327,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     error_message = str(context.error)
     logger.error(
-        f"Error occurred for user {update.effective_user.id if upadte and update.effective_user else 'unknown'}: {error_message}"
+        f"Error occurred for user {update.effective_user.id if update and update.effective_user else 'unknown'}: {error_message}"
     )
     if "BadRequest" in error_message:
         error_message = get_message(language, "telegram_error")

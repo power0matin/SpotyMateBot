@@ -27,6 +27,8 @@ MESSAGES = {
         "download_preview_caption": "پیش‌نمایش 30 ثانیه‌ای آهنگ 🎶",
         "download_song_caption": "آهنگ: {title} - {artist} 🎶",
         "download_error": "خطا در دانلود آهنگ. لطفاً دوباره امتحان کنید.",
+        "fetching": "در حال دریافت آهنگ...",
+        "sending": "در حال ارسال به شما...",
     },
     "en": {
         "welcome": "🎵 Welcome to @SpotyMateBot! Now you can enjoy the bot's features. 🎧\nSend a Spotify link or use /help to get started.",
@@ -56,6 +58,8 @@ MESSAGES = {
         "download_preview_caption": "30-second preview of the track 🎶",
         "download_song_caption": "Song: {title} - {artist} 🎶",
         "download_error": "Error downloading song. Please try again.",
+        "fetching": "Fetching the song...",
+        "sending": "Sending to you...",
     },
 }
 

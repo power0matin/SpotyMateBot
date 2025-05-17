@@ -7,6 +7,7 @@ import re
 import requests
 import os
 import tempfile
+import shutil
 from spotdl import Spotdl
 from spotdl.types.options import DownloaderOptions
 import logging
@@ -28,7 +29,9 @@ def get_spotdl_client():
         _spotdl_client = Spotdl(
             client_id=os.getenv("SPOTIFY_CLIENT_ID"),
             client_secret=os.getenv("SPOTIFY_CLIENT_SECRET"),
-            downloader_settings=DownloaderOptions(output="data/downloads"),
+            downloader_settings=DownloaderOptions(
+                output="data/downloads/{chat_id}_{message_id}"
+            ),
         )
         logger.info("Spotdl client initialized")
     return _spotdl_client
@@ -129,7 +132,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     ),
                     InlineKeyboardButton(
                         get_message(language, "download_song_button"),
-                        callback_data=f"select_quality_{track_info['track_id']}",
+                        callback_data=f"select_quality_{track_info['track_id']}_{update.effective_chat.id}_{update.message.message_id}",
                     ),
                 ],
             ]
@@ -202,7 +205,16 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 get_message(language, "similar_songs_placeholder")
             )
     elif callback_data.startswith("download_preview_"):
-        _, track_id, preview_url = callback_data.split("_", 2)
+        parts = callback_data.split("_", 2)
+        if len(parts) < 3:
+            logger.error(
+                f"Invalid callback_data format for user {user_id}: {callback_data}"
+            )
+            await query.message.reply_text(
+                get_message(language, "error").format(error="Invalid button data")
+            )
+            return
+        _, track_id, preview_url = parts
         logger.info(
             f"User {user_id} requested preview download, track_id: {track_id}, preview_url: {preview_url}"
         )
@@ -244,71 +256,103 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     get_message(language, "error").format(error=str(e))
                 )
     elif callback_data.startswith("select_quality_"):
-        track_id = callback_data.split("_")[1]
-        logger.info(
-            f"User {user_id} requested quality selection for track_id: {track_id}"
-        )
-        # Create quality selection buttons
-        keyboard = [
-            [
-                InlineKeyboardButton(
-                    "128 kbps", callback_data=f"download_song_{track_id}_128"
-                ),
-                InlineKeyboardButton(
-                    "320 kbps", callback_data=f"download_song_{track_id}_320"
-                ),
-            ]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.message.reply_text(
-            get_message(language, "select_quality_prompt"), reply_markup=reply_markup
-        )
-        logger.info(f"Sent quality selection prompt to user {user_id}")
-    elif callback_data.startswith("download_song_"):
-        _, track_id, quality = callback_data.split("_")
-        spotify_url = f"https://open.spotify.com/track/{track_id}"
-        logger.info(
-            f"User {user_id} requested song download, track_id: {track_id}, quality: {quality}kbps, url: {spotify_url}"
-        )
         try:
+            parts = callback_data.split("_")
+            if len(parts) != 5 or parts[1] != "quality":
+                raise ValueError("Invalid select_quality format")
+            track_id, chat_id, message_id = parts[2], parts[3], parts[4]
+            logger.info(
+                f"User {user_id} requested quality selection for track_id: {track_id}, chat_id: {chat_id}, message_id: {message_id}"
+            )
+            # Create quality selection buttons
+            keyboard = [
+                [
+                    InlineKeyboardButton(
+                        "128 kbps",
+                        callback_data=f"download_song_{track_id}_{chat_id}_{message_id}_128",
+                    ),
+                    InlineKeyboardButton(
+                        "320 kbps",
+                        callback_data=f"download_song_{track_id}_{chat_id}_{message_id}_320",
+                    ),
+                ]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.message.reply_text(
+                get_message(language, "select_quality_prompt"),
+                reply_markup=reply_markup,
+            )
+            logger.info(f"Sent quality selection prompt to user {user_id}")
+        except ValueError as e:
+            logger.error(
+                f"Invalid callback_data format for user {user_id}: {callback_data}, error: {str(e)}"
+            )
+            await query.message.reply_text(
+                get_message(language, "error").format(error="Invalid button data")
+            )
+    elif callback_data.startswith("download_song_"):
+        try:
+            parts = callback_data.split("_")
+            if len(parts) != 5:
+                raise ValueError("Invalid download_song format")
+            _, track_id, chat_id, message_id, quality = parts
+            if quality not in ["128", "320"]:
+                raise ValueError("Invalid quality value")
+            spotify_url = f"https://open.spotify.com/track/{track_id}"
+            logger.info(
+                f"User {user_id} requested song download, track_id: {track_id}, quality: {quality}kbps, url: {spotify_url}"
+            )
+            # Send fetching message
+            fetching_msg = await query.message.reply_text(
+                get_message(language, "fetching")
+            )
             # Get spotdl client
             spotdl = get_spotdl_client()
-            # Create downloads directory if it doesn't exist
-            os.makedirs("data/downloads", exist_ok=True)
+            # Create downloads directory
+            download_dir = f"data/downloads/{chat_id}_{message_id}"
+            os.makedirs(download_dir, exist_ok=True)
             # Download the song with specified bitrate
             songs = spotdl.search([spotify_url])
-            if songs:
-                song = songs[0]
-                # Set bitrate in downloader settings
-                spotdl.downloader_settings.bitrate = f"{quality}k"
-                song_path = spotdl.download(song)
-                if os.path.exists(song_path):
-                    with open(song_path, "rb") as audio_file:
-                        await query.message.reply_audio(
-                            audio=audio_file,
-                            caption=get_message(
-                                language, "download_song_caption"
-                            ).format(title=song.name, artist=song.artist),
-                        )
-                    os.unlink(song_path)  # Delete the file after sending
-                    # Clean up downloads directory if empty
-                    if not os.listdir("data/downloads"):
-                        os.rmdir("data/downloads")
-                    logger.info(
-                        f"Sent song audio to user {user_id}: {song.name} by {song.artist}, quality: {quality}kbps"
-                    )
-                else:
-                    logger.error(
-                        f"Song download failed for user {user_id}, track_id: {track_id}: File not found"
-                    )
-                    await query.message.reply_text(
-                        get_message(language, "download_error")
-                    )
-            else:
+            if not songs:
                 logger.error(
                     f"Song search failed for user {user_id}, track_id: {track_id}: No songs found"
                 )
-                await query.message.reply_text(get_message(language, "download_error"))
+                await fetching_msg.edit_text(get_message(language, "download_error"))
+                shutil.rmtree(download_dir, ignore_errors=True)
+                return
+            song = songs[0]
+            # Set bitrate in downloader settings
+            spotdl.downloader_settings.bitrate = f"{quality}k"
+            song_path = spotdl.download(song)
+            # Send sending message
+            await fetching_msg.edit_text(get_message(language, "sending"))
+            if os.path.exists(song_path):
+                with open(song_path, "rb") as audio_file:
+                    await query.message.reply_audio(
+                        audio=audio_file,
+                        caption=get_message(language, "download_song_caption").format(
+                            title=song.name, artist=song.artist
+                        ),
+                        timeout=1000,
+                    )
+                os.unlink(song_path)  # Delete the file after sending
+                logger.info(
+                    f"Sent song audio to user {user_id}: {song.name} by {song.artist}, quality: {quality}kbps"
+                )
+            else:
+                logger.error(
+                    f"Song download failed for user {user_id}, track_id: {track_id}: File not found"
+                )
+                await fetching_msg.edit_text(get_message(language, "download_error"))
+            # Clean up downloads directory
+            shutil.rmtree(download_dir, ignore_errors=True)
+        except ValueError as e:
+            logger.error(
+                f"Invalid callback_data format for user {user_id}: {callback_data}, error: {str(e)}"
+            )
+            await query.message.reply_text(
+                get_message(language, "error").format(error="Invalid button data")
+            )
         except Exception as e:
             logger.error(
                 f"Error downloading song for user {user_id}, track_id: {track_id}, quality: {quality}kbps: {str(e)}"
@@ -316,6 +360,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text(
                 get_message(language, "error").format(error=str(e))
             )
+            # Clean up downloads directory
+            shutil.rmtree(download_dir, ignore_errors=True)
 
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):

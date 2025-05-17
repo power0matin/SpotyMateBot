@@ -26,14 +26,18 @@ def get_spotdl_client():
     """Get or initialize the global spotdl client."""
     global _spotdl_client
     if _spotdl_client is None:
-        _spotdl_client = Spotdl(
-            client_id=os.getenv("SPOTIFY_CLIENT_ID"),
-            client_secret=os.getenv("SPOTIFY_CLIENT_SECRET"),
-            downloader_settings=DownloaderOptions(
-                output="data/downloads/{chat_id}_{message_id}"
-            ),
-        )
-        logger.info("Spotdl client initialized")
+        try:
+            _spotdl_client = Spotdl(
+                client_id=os.getenv("SPOTIFY_CLIENT_ID"),
+                client_secret=os.getenv("SPOTIFY_CLIENT_SECRET"),
+                downloader_settings=DownloaderOptions(
+                    output="data/downloads/{chat_id}_{message_id}"
+                ),
+            )
+            logger.info("Spotdl client initialized")
+        except Exception as e:
+            logger.error(f"Failed to initialize spotdl client: {str(e)}")
+            raise
     return _spotdl_client
 
 
@@ -183,30 +187,40 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif callback_data.startswith("similar_"):
         track_id = callback_data.split("_")[1]
         logger.info(f"Fetching similar songs for user {user_id}, track_id: {track_id}")
-        recommendations = process_spotify_link(
-            f"spotify:track:{track_id}", language, get_recommendations=True
-        )
-        if isinstance(recommendations, list):
-            response = get_message(language, "similar_songs").format(
-                songs="\n".join(
-                    [
-                        f"🎵 {track['title']} - {track['artist']}"
-                        for track in recommendations
-                    ]
-                )
+        try:
+            recommendations = process_spotify_link(
+                f"spotify:track:{track_id}", language, get_recommendations=True
             )
-            await query.message.reply_text(response)
-            logger.info(f"Sent similar songs to user {user_id}")
-        else:
-            logger.warning(
-                f"No similar songs found for user {user_id}, track_id: {track_id}"
+            if isinstance(recommendations, list):
+                response = get_message(language, "similar_songs").format(
+                    songs="\n".join(
+                        [
+                            f"🎵 {track['title']} - {track['artist']}"
+                            for track in recommendations
+                        ]
+                    )
+                )
+                await query.message.reply_text(response)
+                logger.info(f"Sent similar songs to user {user_id}")
+            else:
+                logger.warning(
+                    f"No similar songs found for user {user_id}, track_id: {track_id}"
+                )
+                await query.message.reply_text(
+                    get_message(language, "similar_songs_placeholder")
+                )
+        except Exception as e:
+            logger.error(
+                f"Error fetching similar songs for user {user_id}, track_id: {track_id}: {str(e)}"
             )
             await query.message.reply_text(
-                get_message(language, "similar_songs_placeholder")
+                get_message(language, "error").format(
+                    error="Failed to fetch similar songs"
+                )
             )
     elif callback_data.startswith("download_preview_"):
         parts = callback_data.split("_", 2)
-        if len(parts) < 3:
+        if len(parts) != 3:
             logger.error(
                 f"Invalid callback_data format for user {user_id}: {callback_data}"
             )
@@ -312,36 +326,46 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             download_dir = f"data/downloads/{chat_id}_{message_id}"
             os.makedirs(download_dir, exist_ok=True)
             # Download the song with specified bitrate
-            songs = spotdl.search([spotify_url])
-            if not songs:
-                logger.error(
-                    f"Song search failed for user {user_id}, track_id: {track_id}: No songs found"
-                )
-                await fetching_msg.edit_text(get_message(language, "download_error"))
-                shutil.rmtree(download_dir, ignore_errors=True)
-                return
-            song = songs[0]
-            # Set bitrate in downloader settings
-            spotdl.downloader_settings.bitrate = f"{quality}k"
-            song_path = spotdl.download(song)
-            # Send sending message
-            await fetching_msg.edit_text(get_message(language, "sending"))
-            if os.path.exists(song_path):
-                with open(song_path, "rb") as audio_file:
-                    await query.message.reply_audio(
-                        audio=audio_file,
-                        caption=get_message(language, "download_song_caption").format(
-                            title=song.name, artist=song.artist
-                        ),
-                        timeout=1000,
+            try:
+                songs = spotdl.search([spotify_url])
+                if not songs:
+                    logger.error(
+                        f"Song search failed for user {user_id}, track_id: {track_id}: No songs found"
                     )
-                os.unlink(song_path)  # Delete the file after sending
-                logger.info(
-                    f"Sent song audio to user {user_id}: {song.name} by {song.artist}, quality: {quality}kbps"
-                )
-            else:
+                    await fetching_msg.edit_text(
+                        get_message(language, "download_error")
+                    )
+                    shutil.rmtree(download_dir, ignore_errors=True)
+                    return
+                song = songs[0]
+                # Set bitrate in downloader settings
+                spotdl.downloader_settings.bitrate = f"{quality}k"
+                song_path = spotdl.download(song)
+                # Send sending message
+                await fetching_msg.edit_text(get_message(language, "sending"))
+                if os.path.exists(song_path):
+                    with open(song_path, "rb") as audio_file:
+                        await query.message.reply_audio(
+                            audio=audio_file,
+                            caption=get_message(
+                                language, "download_song_caption"
+                            ).format(title=song.name, artist=song.artist),
+                            timeout=1000,
+                        )
+                    os.unlink(song_path)  # Delete the file after sending
+                    logger.info(
+                        f"Sent song audio to user {user_id}: {song.name} by {song.artist}, quality: {quality}kbps"
+                    )
+                else:
+                    logger.error(
+                        f"Song download failed for user {user_id}, track_id: {track_id}: File not found"
+                    )
+                    await fetching_msg.edit_text(
+                        get_message(language, "download_error")
+                    )
+            except Exception as e:
                 logger.error(
-                    f"Song download failed for user {user_id}, track_id: {track_id}: File not found"
+                    f"Spotdl download error for user {user_id}, track_id: {track_id}: {str(e)}"
                 )
                 await fetching_msg.edit_text(get_message(language, "download_error"))
             # Clean up downloads directory

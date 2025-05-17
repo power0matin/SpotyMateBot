@@ -191,7 +191,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             recommendations = process_spotify_link(
                 f"spotify:track:{track_id}", language, get_recommendations=True
             )
-            if isinstance(recommendations, list):
+            if isinstance(recommendations, list) and recommendations:
                 response = get_message(language, "similar_songs").format(
                     songs="\n".join(
                         [
@@ -215,30 +215,24 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             await query.message.reply_text(
                 get_message(language, "error").format(
-                    error="Failed to fetch similar songs"
+                    error="Failed to fetch similar songs. Please try again later."
                 )
             )
     elif callback_data.startswith("download_preview_"):
-        parts = callback_data.split("_", 2)
-        if len(parts) != 3:
-            logger.error(
-                f"Invalid callback_data format for user {user_id}: {callback_data}"
+        try:
+            parts = callback_data.split("_", 2)
+            if len(parts) != 3:
+                raise ValueError("Invalid download_preview format")
+            _, track_id, preview_url = parts
+            logger.info(
+                f"User {user_id} requested preview download, track_id: {track_id}, preview_url: {preview_url}"
             )
-            await query.message.reply_text(
-                get_message(language, "error").format(error="Invalid button data")
-            )
-            return
-        _, track_id, preview_url = parts
-        logger.info(
-            f"User {user_id} requested preview download, track_id: {track_id}, preview_url: {preview_url}"
-        )
-        if preview_url == "no_preview" or not preview_url:
-            logger.warning(
-                f"No preview available for user {user_id}, track_id: {track_id}"
-            )
-            await query.message.reply_text(get_message(language, "no_preview"))
-        else:
-            try:
+            if preview_url == "no_preview" or not preview_url:
+                logger.warning(
+                    f"No preview available for user {user_id}, track_id: {track_id}"
+                )
+                await query.message.reply_text(get_message(language, "no_preview"))
+            else:
                 response = requests.get(preview_url, timeout=10)
                 response.raise_for_status()
                 with tempfile.NamedTemporaryFile(
@@ -255,20 +249,27 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logger.info(
                     f"Sent preview audio to user {user_id}, track_id: {track_id}"
                 )
-            except requests.RequestException as e:
-                logger.error(
-                    f"Preview download failed for user {user_id}, track_id: {track_id}: {str(e)}"
-                )
-                await query.message.reply_text(
-                    get_message(language, "download_error").format(error=str(e))
-                )
-            except Exception as e:
-                logger.error(
-                    f"Error sending preview to user {user_id}, track_id: {track_id}: {str(e)}"
-                )
-                await query.message.reply_text(
-                    get_message(language, "error").format(error=str(e))
-                )
+        except ValueError as e:
+            logger.error(
+                f"Invalid callback_data format for user {user_id}: {callback_data}, error: {str(e)}"
+            )
+            await query.message.reply_text(
+                get_message(language, "error").format(error="Invalid button data")
+            )
+        except requests.RequestException as e:
+            logger.error(
+                f"Preview download failed for user {user_id}, track_id: {track_id}: {str(e)}"
+            )
+            await query.message.reply_text(
+                get_message(language, "download_error").format(error=str(e))
+            )
+        except Exception as e:
+            logger.error(
+                f"Error sending preview to user {user_id}, track_id: {track_id}: {str(e)}"
+            )
+            await query.message.reply_text(
+                get_message(language, "error").format(error=str(e))
+            )
     elif callback_data.startswith("select_quality_"):
         try:
             parts = callback_data.split("_")

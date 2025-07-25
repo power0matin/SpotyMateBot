@@ -13,7 +13,7 @@ A professional Telegram bot that interacts with Spotify links and supports multi
 
 1. **Clone the repository:**
 	```bash
-	git clone <repository-url>
+	git clone https://github.com/power0matin/SpotyMateBot
 	cd spotymatebot
 	```
 

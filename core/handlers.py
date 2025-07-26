@@ -90,7 +90,7 @@ async def language_selection(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer()
 
     user_id = query.from_user.id
-    language = query.data.split("_")[1]  # Extract 'fa' or 'en'
+    language = query.data.split("_")[1]
     language_name = "فارسی" if language == "fa" else "English"
     logger.info(f"User {user_id} selected language: {language_name}")
 
@@ -118,7 +118,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"Processing Spotify link for user {user_id}: {message_text}")
         track_info = process_spotify_link(message_text, language)
         if isinstance(track_info, dict):
-            # Create inline buttons
             keyboard = [
                 [
                     InlineKeyboardButton(
@@ -141,7 +140,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ],
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
-            # Send message with track info and cover image
             try:
                 await update.message.reply_photo(
                     photo=track_info["cover_url"],
@@ -232,23 +230,19 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"No preview available for user {user_id}, track_id: {track_id}"
                 )
                 await query.message.reply_text(get_message(language, "no_preview"))
-            else:
-                response = requests.get(preview_url, timeout=10)
-                response.raise_for_status()
-                with tempfile.NamedTemporaryFile(
-                    delete=False, suffix=".mp3"
-                ) as tmp_file:
-                    tmp_file.write(response.content)
-                    tmp_file_path = tmp_file.name
-                with open(tmp_file_path, "rb") as audio_file:
-                    await query.message.reply_audio(
-                        audio=audio_file,
-                        caption=get_message(language, "download_preview_caption"),
-                    )
-                os.unlink(tmp_file_path)  # Delete temporary file
-                logger.info(
-                    f"Sent preview audio to user {user_id}, track_id: {track_id}"
+                return
+            response = requests.get(preview_url, timeout=10)
+            response.raise_for_status()
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_file:
+                tmp_file.write(response.content)
+                tmp_file_path = tmp_file.name
+            with open(tmp_file_path, "rb") as audio_file:
+                await query.message.reply_audio(
+                    audio=audio_file,
+                    caption=get_message(language, "download_preview_caption"),
                 )
+            os.unlink(tmp_file_path)
+            logger.info(f"Sent preview audio to user {user_id}, track_id: {track_id}")
         except ValueError as e:
             logger.error(
                 f"Invalid callback_data format for user {user_id}: {callback_data}, error: {str(e)}"
@@ -275,11 +269,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parts = callback_data.split("_")
             if len(parts) != 5 or parts[1] != "quality":
                 raise ValueError("Invalid select_quality format")
-            track_id, chat_id, message_id = parts[2], parts[3], parts[4]
+            _, _, track_id, chat_id, message_id = parts
             logger.info(
                 f"User {user_id} requested quality selection for track_id: {track_id}, chat_id: {chat_id}, message_id: {message_id}"
             )
-            # Create quality selection buttons
             keyboard = [
                 [
                     InlineKeyboardButton(
@@ -308,25 +301,21 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif callback_data.startswith("download_song_"):
         try:
             parts = callback_data.split("_")
-            if len(parts) != 5:
+            if len(parts) != 5 or parts[0] != "download" or parts[1] != "song":
                 raise ValueError("Invalid download_song format")
-            _, track_id, chat_id, message_id, quality = parts
+            track_id, chat_id, message_id, quality = parts[2], parts[3], parts[4]
             if quality not in ["128", "320"]:
                 raise ValueError("Invalid quality value")
             spotify_url = f"https://open.spotify.com/track/{track_id}"
             logger.info(
                 f"User {user_id} requested song download, track_id: {track_id}, quality: {quality}kbps, url: {spotify_url}"
             )
-            # Send fetching message
             fetching_msg = await query.message.reply_text(
                 get_message(language, "fetching")
             )
-            # Get spotdl client
             spotdl = get_spotdl_client()
-            # Create downloads directory
             download_dir = f"data/downloads/{chat_id}_{message_id}"
             os.makedirs(download_dir, exist_ok=True)
-            # Download the song with specified bitrate
             try:
                 songs = spotdl.search([spotify_url])
                 if not songs:
@@ -339,11 +328,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     shutil.rmtree(download_dir, ignore_errors=True)
                     return
                 song = songs[0]
-                # Set bitrate in downloader settings
                 spotdl.downloader_settings.bitrate = f"{quality}k"
                 song_path = spotdl.download(song)
-                # Send sending message
-                await fetching_msg.edit_text(get_message(language, "sending"))
                 if os.path.exists(song_path):
                     with open(song_path, "rb") as audio_file:
                         await query.message.reply_audio(
@@ -353,7 +339,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             ).format(title=song.name, artist=song.artist),
                             timeout=1000,
                         )
-                    os.unlink(song_path)  # Delete the file after sending
+                    os.unlink(song_path)
                     logger.info(
                         f"Sent song audio to user {user_id}: {song.name} by {song.artist}, quality: {quality}kbps"
                     )
@@ -369,8 +355,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"Spotdl download error for user {user_id}, track_id: {track_id}: {str(e)}"
                 )
                 await fetching_msg.edit_text(get_message(language, "download_error"))
-            # Clean up downloads directory
-            shutil.rmtree(download_dir, ignore_errors=True)
+            finally:
+                shutil.rmtree(download_dir, ignore_errors=True)
         except ValueError as e:
             logger.error(
                 f"Invalid callback_data format for user {user_id}: {callback_data}, error: {str(e)}"
@@ -385,12 +371,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text(
                 get_message(language, "error").format(error=str(e))
             )
-            # Clean up downloads directory
             shutil.rmtree(download_dir, ignore_errors=True)
 
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle errors and notify the user."""
     language = (
         get_user_language(update.effective_user.id)
         if update and update.effective_user
@@ -402,8 +386,5 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     if "BadRequest" in error_message:
         error_message = get_message(language, "telegram_error")
-    (
+    if update and update.message:
         await update.message.reply_text(error_message)
-        if update and update.message
-        else None
-    )

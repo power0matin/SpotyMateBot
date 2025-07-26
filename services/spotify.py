@@ -1,57 +1,35 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes
-from database.db import get_user_language, save_user_language
-from utils.i18n import get_message
-import re
+import os
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
-import os
 import logging
+from utils.i18n import get_message
+
+# Configure logging
+logging.basicConfig(
+    format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+# Global Spotify client
+_spotify_client = None
 
 
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    current_language = get_user_language(user_id)
-
-    if current_language:
-        await update.message.reply_text(
-            get_message(current_language, "welcome").format(
-                language=current_language.upper()
+def get_spotify_client():
+    """Get or initialize the global Spotify client."""
+    global _spotify_client
+    if _spotify_client is None:
+        client_id = os.getenv("SPOTIFY_CLIENT_ID")
+        client_secret = os.getenv("SPOTIFY_CLIENT_SECRET")
+        if not client_id or not client_secret:
+            logger.error("Spotify client ID or secret not set")
+            raise ValueError("Spotify client ID or secret not set")
+        _spotify_client = spotipy.Spotify(
+            auth_manager=SpotifyClientCredentials(
+                client_id=client_id, client_secret=client_secret
             )
         )
-    else:
-        keyboard = [
-            [
-                InlineKeyboardButton("فارسی 🇮🇷", callback_data="lang_fa"),
-                InlineKeyboardButton("English 🇬🇧", callback_data="lang_en"),
-            ]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(
-            "🎵 Welcome to @SpotyMateBot! Please choose your language:\nبه @SpotyMateBot خوش اومدی! لطفاً زبانت رو انتخاب کن:",
-            reply_markup=reply_markup,
-        )
-
-
-async def language_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    user_id = query.from_user.id
-    language = query.data.split("_")[1]  # Extract 'fa' or 'en'
-    language_name = "فارسی" if language == "fa" else "English"
-
-    save_user_language(user_id, language)
-    await query.message.edit_text(
-        get_message(language, "language_selected").format(language=language_name)
-    )
-
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    language = get_user_language(user_id) or "en"
-    await update.message.reply_text(get_message(language, "help"))
+        logger.info("Spotify client initialized")
+    return _spotify_client
 
 
 def process_spotify_link(
@@ -65,18 +43,31 @@ def process_spotify_link(
         sp = get_spotify_client()
         if get_recommendations:
             track_id = link.split(":")[-1]
-            recommendations = sp.recommendations(seed_tracks=[track_id], limit=3)
-            logger.info(
-                f"Fetched {len(recommendations['tracks'])} recommendations for track_id: {track_id}"
-            )
-            return [
-                {
-                    "title": track["name"],
-                    "artist": track["artists"][0]["name"],
-                    "track_id": track["id"],
-                }
-                for track in recommendations["tracks"]
-            ]
+            try:
+                recommendations = sp.recommendations(
+                    seed_tracks=[track_id], limit=3, market="US"
+                )
+                if not recommendations["tracks"]:
+                    logger.warning(f"No recommendations found for track_id: {track_id}")
+                    return get_message(language, "similar_songs_placeholder")
+                logger.info(
+                    f"Fetched {len(recommendations['tracks'])} recommendations for track_id: {track_id}"
+                )
+                return [
+                    {
+                        "title": track["name"],
+                        "artist": track["artists"][0]["name"],
+                        "track_id": track["id"],
+                    }
+                    for track in recommendations["tracks"]
+                ]
+            except spotipy.exceptions.SpotifyException as e:
+                logger.error(
+                    f"Spotify API error for recommendations, track_id: {track_id}: {str(e)}"
+                )
+                return get_message(language, "error").format(
+                    error="Failed to fetch similar songs"
+                )
         if "track" in link:
             track = sp.track(link)
             album = sp.album(track["album"]["id"])
@@ -111,44 +102,11 @@ def process_spotify_link(
         else:
             logger.warning(f"Unsupported Spotify link: {link}")
             return get_message(language, "unsupported_link")
+    except spotipy.exceptions.SpotifyException as e:
+        logger.error(f"Spotify API error for link {link}: {str(e)}")
+        return get_message(language, "error").format(
+            error="Failed to process Spotify link"
+        )
     except Exception as e:
         logger.error(f"Error processing Spotify link {link}: {str(e)}")
         return get_message(language, "error").format(error=str(e))
-
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    language = get_user_language(user_id) or "en"
-    message_text = update.message.text
-
-    spotify_pattern = r"https?://open\.spotify\.com/(track|album|playlist)/[a-zA-Z0-9]+"
-    if re.search(spotify_pattern, message_text):
-        response = process_spotify_link(message_text, language)
-        await update.message.reply_text(response)
-    else:
-        await update.message.reply_text(get_message(language, "help"))
-
-
-# Configure logging
-logging.basicConfig(
-    format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO
-)
-logger = logging.getLogger(__name__)
-
-# Global Spotify client
-_spotify_client = None
-
-
-def get_spotify_client():
-    """Get or initialize the global Spotify client."""
-    global _spotify_client
-    if _spotify_client is None:
-        client_id = os.getenv("SPOTIFY_CLIENT_ID")
-        client_secret = os.getenv("SPOTIFY_CLIENT_SECRET")
-        _spotify_client = spotipy.Spotify(
-            auth_manager=SpotifyClientCredentials(
-                client_id=client_id, client_secret=client_secret
-            )
-        )
-        logger.info("Spotify client initialized")
-    return _spotify_client

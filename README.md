@@ -5,7 +5,7 @@ A powerful and multilingual Telegram bot that interacts with Spotify links, disp
 
 ## 🌟 Features
 
-- 🌍 Multilingual support (🇮🇷 Persian / 🇬🇧 English)
+- 🌍 Multilingual support (🇮🇷 Persian / 🇺🇸 English)
 - 🔗 Recognizes and processes Spotify track links
 - 🎵 Displays detailed info about songs and artists
 - 💬 `/start` command with language selection

@@ -303,7 +303,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parts = callback_data.split("_")
             if len(parts) != 6 or parts[0] != "download" or parts[1] != "song":
                 raise ValueError("Invalid download_song format")
-            _, _, track_id, chat_id, message_id, quality = parts
+            _, track_id, chat_id, message_id, quality = parts
             if quality not in ["128", "320"]:
                 raise ValueError("Invalid quality value")
             spotify_url = f"https://open.spotify.com/track/{track_id}"

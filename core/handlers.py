@@ -248,7 +248,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"Invalid callback_data format for user {user_id}: {callback_data}, error: {str(e)}"
             )
             await query.message.reply_text(
-                get_message(language, "error").format(error="Invalid button data")
+                get_message(language, "error").format(error="دکمه نامعتبر است")
             )
         except requests.RequestException as e:
             logger.error(
@@ -296,14 +296,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"Invalid callback_data format for user {user_id}: {callback_data}, error: {str(e)}"
             )
             await query.message.reply_text(
-                get_message(language, "error").format(error="Invalid button data")
+                get_message(language, "error").format(error="دکمه نامعتبر است")
             )
     elif callback_data.startswith("download_song_"):
         try:
             parts = callback_data.split("_")
-            if len(parts) != 5 or parts[0] != "download" or parts[1] != "song":
+            if len(parts) != 6 or parts[0] != "download" or parts[1] != "song":
                 raise ValueError("Invalid download_song format")
-            track_id, chat_id, message_id, quality = parts[2], parts[3], parts[4]
+            _, _, track_id, chat_id, message_id, quality = parts
             if quality not in ["128", "320"]:
                 raise ValueError("Invalid quality value")
             spotify_url = f"https://open.spotify.com/track/{track_id}"
@@ -362,7 +362,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"Invalid callback_data format for user {user_id}: {callback_data}, error: {str(e)}"
             )
             await query.message.reply_text(
-                get_message(language, "error").format(error="Invalid button data")
+                get_message(language, "error").format(error="دکمه نامعتبر است")
             )
         except Exception as e:
             logger.error(

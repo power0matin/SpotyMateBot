@@ -11,6 +11,8 @@ A powerful and multilingual Telegram bot that interacts with Spotify links, disp
 - 🆘 /help command with user guidance
 - 🗂️ Stores user preferences in a local SQLite database
 
+> ### ⚠️ Important: Run Spotify API Test Script Before Using the Bot
+> Before running the bot, please run the [Spotify-API-Test](https://github.com/power0matin/Spotify-API-Test) script to verify your Spotify API connectivity.
 
 ## 🚀 Setup
 
@@ -86,6 +88,8 @@ SPOTIFY_REDIRECT_URI=http://localhost:8888/callback
 
 
 ### 5. Run the bot
+
+
 
 ```bash
 python main.py
